@@ -52,11 +52,23 @@ CasoImpacto = Literal[
 
 
 class NodoImpactado(BaseModel):
-    """Elemento de la red alcanzado al simular una indisponibilidad."""
+    """Elemento de la red (id, nombre y capa)."""
 
     id: str
     nombre: str
     capa: Capa
+
+
+class NodoAfectado(NodoImpactado):
+    """
+    Elemento al que le llega la falla.
+
+    - nivel: cuántas flechas hay desde el origen hasta este elemento.
+    - camino: ids desde el origen hasta este elemento.
+    """
+
+    nivel: int
+    camino: List[str]
 
 
 class ImpactoResponse(BaseModel):
@@ -66,12 +78,14 @@ class ImpactoResponse(BaseModel):
 
     - origen: elemento consultado (None si el id no existe).
     - caso: inexistente | sin_dependencias | afecta_cadena
-    - visitados: elementos alcanzados en orden (incluye el origen).
-    - afectados: visitados sin el origen (cadena comprometida).
+    - visitados: ids en el orden en que los visitó el recorrido
+      (el primero es el origen).
+    - afectados: elementos alcanzados, en el orden de visita del
+      recorrido (por niveles), sin incluir el origen.
     """
 
     origen: Optional[NodoImpactado] = None
     caso: CasoImpacto
     mensaje: str
-    visitados: List[NodoImpactado] = []
-    afectados: List[NodoImpactado] = []
+    visitados: List[str] = []
+    afectados: List[NodoAfectado] = []

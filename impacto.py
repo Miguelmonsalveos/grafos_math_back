@@ -5,8 +5,8 @@ Propósito de producto
 ---------------------
 Cuando un proveedor, un insumo o un producto deja de estar disponible,
 producción necesita saber qué más de la panadería queda comprometido.
-Esta capa responde esa pregunta de negocio sin depender de otros módulos
-de recorrido: trae su propia propagación sobre el grafo.
+Esta capa responde esa pregunta de negocio usando el recorrido BFS de
+`recorrido.py`.
 
 Modelo de dependencias
 ----------------------
@@ -25,32 +25,25 @@ Contrato de respuesta (`ImpactoResponse`):
   - sin_dependencias  → existe, pero nadie más queda comprometido
   - afecta_cadena     → hay elementos alcanzados en la red
 
-Punto de extensión (opcional)
------------------------------
-Si más adelante se quiere sustituir solo la forma de caminar el grafo,
-asignar una función a `_recorrido_externo` con la firma:
-
-    (grafo: Grafo, id_inicio: str) -> list[str]
-
-Esa función debe devolver los ids visitados (el primero = id_inicio).
-Mientras `_recorrido_externo` sea None, se usa la propagación interna.
-Ver `recorrido.py` como guía de referencia para ese contrato.
+Recorrido
+---------
+El caminar del grafo lo hace el BFS de `recorrido.py`, que devuelve
+`visitados` (orden de llegada, por niveles) y `padres`. Con `padres` se
+reconstruye por qué camino llega la falla a cada elemento afectado.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Optional
-
-from models import Grafo, ImpactoResponse, Nodo, NodoImpactado
-
-# Extensión opcional: no se importa ningún módulo externo de recorrido.
-# Si se asigna una función aquí, reemplaza solo el caminar del grafo.
-_recorrido_externo: Optional[Callable[[Grafo, str], list[str]]] = None
+from models import Grafo, ImpactoResponse, Nodo, NodoAfectado, NodoImpactado
+from recorrido import reconstruir_camino, recorrer_red
 
 
 def _a_nodo_impactado(nodo: Nodo) -> NodoImpactado:
     return NodoImpactado(id=nodo.id, nombre=nodo.nombre, capa=nodo.capa)
+
+
+def _a_nodo_afectado(nodo: Nodo, camino: list[str]) -> NodoAfectado:
+    return NodoAfectado(id=nodo.id, nombre=nodo.nombre, capa=nodo.capa, nivel=len(camino) - 1, camino=camino)
 
 
 def _buscar(grafo: Grafo, elemento_id: str) -> Nodo | None:
@@ -58,35 +51,6 @@ def _buscar(grafo: Grafo, elemento_id: str) -> Nodo | None:
         if nodo.id == elemento_id:
             return nodo
     return None
-
-
-def _propagar_indisponibilidad(grafo: Grafo, id_inicio: str) -> list[str]:
-    """
-    Propaga la indisponibilidad sobre la red.
-
-    Empieza en id_inicio y, mientras haya novedades, marca como no
-    operables a quienes REQUIEREN algo que ya quedó indisponible
-    (recorre en contra de las aristas).
-    """
-    visitados: list[str] = [id_inicio]
-    caidos = {id_inicio}
-    cambio = True
-
-    while cambio:
-        cambio = False
-        for arista in grafo.aristas:
-            if arista.destino in caidos and arista.origen not in caidos:
-                caidos.add(arista.origen)
-                visitados.append(arista.origen)
-                cambio = True
-
-    return visitados
-
-
-def _ids_alcanzados(grafo: Grafo, elemento_id: str) -> list[str]:
-    if _recorrido_externo is not None:
-        return _recorrido_externo(grafo, elemento_id)
-    return _propagar_indisponibilidad(grafo, elemento_id)
 
 
 def consultar_impacto(grafo: Grafo, elemento_id: str) -> ImpactoResponse:
@@ -105,16 +69,13 @@ def consultar_impacto(grafo: Grafo, elemento_id: str) -> ImpactoResponse:
             afectados=[],
         )
 
-    ids_visitados = _ids_alcanzados(grafo, elemento_id)
+    ids_visitados, padres = recorrer_red(grafo, elemento_id)
 
     nodos_por_id = {nodo.id: nodo for nodo in grafo.nodos}
-    visitados: list[NodoImpactado] = []
-    for vid in ids_visitados:
-        nodo = nodos_por_id.get(vid)
-        if nodo is not None:
-            visitados.append(_a_nodo_impactado(nodo))
-
-    afectados = [n for n in visitados if n.id != elemento_id]
+    afectados = [
+        _a_nodo_afectado(nodos_por_id[vid], reconstruir_camino(padres, vid))
+        for vid in ids_visitados[1:]  # el primero es el origen
+    ]
 
     if not afectados:
         return ImpactoResponse(
@@ -125,7 +86,7 @@ def consultar_impacto(grafo: Grafo, elemento_id: str) -> ImpactoResponse:
                 "ningún otro elemento de la red depende de él: su "
                 "indisponibilidad no compromete la producción."
             ),
-            visitados=visitados,
+            visitados=ids_visitados,
             afectados=[],
         )
 
@@ -136,7 +97,7 @@ def consultar_impacto(grafo: Grafo, elemento_id: str) -> ImpactoResponse:
             f"Si '{origen.nombre}' ({origen.id}) no está disponible, "
             f"quedan comprometidos {len(afectados)} elemento(s) de la red."
         ),
-        visitados=visitados,
+        visitados=ids_visitados,
         afectados=afectados,
     )
 

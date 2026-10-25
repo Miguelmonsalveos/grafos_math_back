@@ -87,9 +87,20 @@ Cuando un proveedor o un insumo deja de entregar, la panadería necesita saber q
 
 ### Qué significa “alcanzar” en este negocio
 
-Alcanzar un elemento significa: **si el nodo consultado no está disponible, ese otro elemento también queda imposibilitado de operar**, porque depende de él de forma directa o a través de la cadena.
+Alcanzar significa **“le llega la falla”**. Funciona como fichas de dominó.
 
-Ejemplo: si falla `PRV-MATERIAPRIMA`, se alcanzan `INS-HARINA`, `INS-AZUCAR`, `INS-LEVADURA` y luego los productos que las requieren (`PRD-PAN`, `PRD-GALLETA`, `PRD-PONQUE`, `PRD-TOSTADAS`).
+Si la Distribuidora de químicos deja de entregar:
+
+```
+Distribuidora de químicos  ──►  Conservante  ──►  Ponqué
+                                            └──►  Tostadas
+```
+
+1. Sin la distribuidora no hay **conservante**: la falla lo alcanza directamente.
+2. Sin conservante no se pueden hacer el **ponqué** ni las **tostadas**: la falla los alcanza a través del conservante.
+3. El **pan** no usa conservante, así que la falla **no lo alcanza** y se sigue produciendo.
+
+Es decir, lo que se alcanza desde un elemento es todo lo que se cae si ese elemento falla.
 
 La flecha del grafo es `A REQUIERE B` (producto → insumo → proveedor). El impacto se calcula **en contra** de esa flecha: del elemento no disponible hacia quienes lo necesitan.
 
@@ -103,18 +114,18 @@ GET /impacto/{elemento_id}
 |---|---|---|
 | `inexistente` | 404 | El id no está en el catálogo |
 | `sin_dependencias` | 200 | Existe, pero nadie depende de él |
-| `afecta_cadena` | 200 | Hay elementos alcanzados en `afectados` / `visitados` |
+| `afecta_cadena` | 200 | Hay elementos alcanzados en `afectados` |
 
 ### Piezas del backend
 
 | Archivo | Rol |
 |---|---|
-| `impacto.py` | Disponibilidad e impacto: producto listo para consultar (incluye su propia propagación sobre el grafo). |
-| `recorrido.py` | Guía de referencia del contrato de recorrido. **No es dependencia** de `impacto.py`; sirve para especializar el caminar del grafo más adelante. |
+| `impacto.py` | Disponibilidad e impacto: distingue los tres casos y arma la respuesta. |
+| `recorrido.py` | Recorrido BFS propio sobre la red de dependencias. |
 | `main.py` | Expone `GET /impacto/{id}` junto al resto de la API. |
 | `models.py` | Contratos de respuesta (`ImpactoResponse`, etc.). |
 
-La interfaz debe consumir `GET /impacto/{id}` y usar `visitados` / `afectados` para resaltar la cadena.
+La interfaz debe consumir `GET /impacto/{id}` y usar `afectados` para resaltar la cadena.
 
 ### Cómo probar
 
